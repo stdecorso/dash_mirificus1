@@ -94,15 +94,15 @@
 proj4.defs('EPSG:3035', '+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
 proj4.defs('EPSG:4326', '+proj=longlat +datum=WGS84 +no_defs');
 
-// URL GeoServer con Proxy allorigins incorporato per evitare i blocchi di caricamento JSON/XML
+// URL GeoServer avvolto in un Proxy allorigins configurato per gestire le stringhe JSON in modo nativo
 const originaleUrl = 'https://mirificus.isprambiente.it/geoserver/geonode/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=geonode%3Asuhi_comuni&maxFeatures=60&outputFormat=application%2Fjson';
-const geoserverUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(originaleUrl);
+const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(originaleUrl);
 
 // Mappa dei colori per i 3 livelli artificiali
 const coloriLivelli = {
-  1: '#FFCC00', // Giallo / Oro
+  1: '#FFCC00', // Giallo
   2: '#FF6600', // Arancione
-  3: '#CC0000'  // Rosso Scuro
+  3: '#CC0000'  // Rosso
 };
 
 let originalGeojsonData = null;
@@ -124,12 +124,17 @@ function getFeatureStyle(feature) {
 
 async function loadData() {
   try {
-    const response = await fetch(geoserverUrl);
-    if (!response.ok) throw new Error('Errore server: ' + response.status);
-    const geojsonData = await response.json();
+    const response = await fetch(proxyUrl);
+    if (!response.ok) throw new Error('Errore server proxy: ' + response.status);
+    
+    // Allorigins inserisce la risposta all'interno di un oggetto JSON sotto la chiave .contents
+    const proxyData = await response.json();
+    
+    // Convertiamo la stringa ricevuta nel file GeoJSON effettivo
+    const geojsonData = JSON.parse(proxyData.contents);
 
     if (!geojsonData.features || geojsonData.features.length === 0) {
-      throw new Error('Nessuna feature trouvata.');
+      throw new Error('Nessuna feature trovata nei dati di GeoServer.');
     }
 
     geojsonData.features.forEach(feature => {
@@ -168,7 +173,6 @@ async function loadData() {
 
     geojsonLayer = L.geoJSON(null).addTo(map);
 
-    // CORREZIONE: Nuova Legenda coordinata con le tue definizioni scientifiche
     const legend = L.control({position: 'bottomright'});
     legend.onAdd = function () {
       const div = L.DomUtil.create('div', 'info legend');
