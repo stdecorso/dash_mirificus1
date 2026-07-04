@@ -21,18 +21,21 @@
     #myDiv { height: 550px; }
     .legend {
       background: white;
-      padding: 10px;
-      line-height: 18px;
-      color: #555;
+      padding: 12px;
+      line-height: 24px;
+      color: #333;
       border-radius: 5px;
       box-shadow: 0 0 15px rgba(0,0,0,0.2);
+      font-size: 13px;
     }
     .legend i {
-      width: 18px;
-      height: 18px;
+      width: 20px;
+      height: 20px;
       float: left;
-      margin-right: 8px;
-      opacity: 0.7;
+      margin-right: 10px;
+      opacity: 0.8;
+      border: 1px solid #999;
+      border-radius: 3px;
     }
   </style>
 </head>
@@ -40,30 +43,29 @@
 
 <nav class="navbar navbar-dark bg-dark mb-4">
   <div class="container-fluid">
-    <span class="navbar-brand mb-0 h1">📊 Dashboard Copertura del Suolo (Test Geoserver + Plotly)</span>
+    <span class="navbar-brand mb-0 h1">📊 Variazioni LST a diversi livelli di urbanizzazione</span>
   </div>
 </nav>
 
 <div class="container-fluid px-4">
   <div class="card p-3 mb-4">
     <div class="row g-3 align-items-center">
-      <div class="col-md-4">
-        <label for="liv_artifSelect" class="form-label fw-bold">Livello Artificiale</label>
+      <div class="col-md-5">
+        <label for="liv_artifSelect" class="form-label fw-bold">Seleziona Categoria / Livello Artificiale</label>
         <select id="liv_artifSelect" class="form-select">
-          <option value="all">Tutti i Livelli</option>
-          <option value="1">Livello artificiale 1</option>
-          <option value="2">Livello artificiale 2</option>
-          <option value="3">Livello artificiale 3</option>
+          <option value="1" selected>Rurale LC minore del 10%</option>
+          <option value="2">Suburbano LC 10%-50%</option>
+          <option value="3">Urbano LC maggiore del 50%</option>
         </select>
       </div>
-      <div class="col-md-4">
-        <label for="comuneSelect" class="form-label fw-bold">Comune</label>
+      <div class="col-md-5">
+        <label for="comuneSelect" class="form-label fw-bold">Filtra per Comune</label>
         <select id="comuneSelect" class="form-select">
-          <option value="all">Tutti i Comuni (Vista Globale)</option>
+          <option value="all">Tutti i Comuni</option>
         </select>
       </div>
-      <div class="col-md-4 d-flex align-items-end h-100">
-        <button id="resetBtn" class="btn btn-outline-secondary w-100" style="margin-top: 32px;">Resetta Filtri</button>
+      <div class="col-md-2 d-flex align-items-end h-100">
+        <button id="resetBtn" class="btn btn-outline-secondary w-100" style="margin-top: 32px;">Reset</button>
       </div>
     </div>
   </div>
@@ -73,14 +75,14 @@
   <div class="row g-4">
     <div class="col-lg-6">
       <div class="card p-3">
-        <h5 class="card-title border-bottom pb-2 text-secondary">Analisi Percentuali di Copertura</h5>
+        <h5 class="card-title border-bottom pb-2 text-secondary">Percentuale di Copertura Consumata per Comune</h5>
         <div id="myDiv"></div>
       </div>
     </div>
     
     <div class="col-lg-6">
       <div class="card p-3">
-        <h5 class="card-title border-bottom pb-2 text-secondary">Distribuzione Geografica (Copertura Costruita)</h5>
+        <h5 class="card-title border-bottom pb-2 text-secondary">Localizzazione Geografica Livelli</h5>
         <div id="mapDiv"></div>
       </div>
     </div>
@@ -88,30 +90,35 @@
 </div>
 
 <script>
+// Proiezioni CRS
 proj4.defs('EPSG:3035', '+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
 proj4.defs('EPSG:4326', '+proj=longlat +datum=WGS84 +no_defs');
 
-const geoserverUrl = 'https://mirificus.isprambiente.it/geoserver/geonode/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=geonode%3Asuhi_comuni&maxFeatures=60&outputFormat=application%2Fjson';
+// URL GeoServer con Proxy allorigins incorporato per evitare i blocchi di caricamento JSON/XML
+const originaleUrl = 'https://mirificus.isprambiente.it/geoserver/geonode/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=geonode%3Asuhi_comuni&maxFeatures=60&outputFormat=application%2Fjson';
+const geoserverUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(originaleUrl);
+
+// Mappa dei colori per i 3 livelli artificiali
+const coloriLivelli = {
+  1: '#FFCC00', // Giallo / Oro
+  2: '#FF6600', // Arancione
+  3: '#CC0000'  // Rosso Scuro
+};
 
 let originalGeojsonData = null;
 let data = [];
 let map;
 let geojsonLayer;
-let selectedLevel = "all";
+let selectedLevel = 1;
 let selectedComune = "all";
 
 function getFeatureStyle(feature) {
-  const copCons = feature.properties.cop_cons || 0;
-  let color = 'rgba(254, 217, 142, 0.5)';
-  if (copCons > 75) color = 'rgba(180, 0, 0, 0.9)';
-  else if (copCons > 50) color = 'rgba(235, 60, 0, 0.7)';
-  else if (copCons > 25) color = 'rgba(253, 141, 60, 0.6)';
-  
+  const lvl = parseInt(feature.properties.liv_artif) || 1;
   return {
-    fillColor: color,
+    fillColor: coloriLivelli[lvl] || '#999',
     weight: 1.5,
     color: '#333',
-    fillOpacity: 0.7
+    fillOpacity: 0.75
   };
 }
 
@@ -122,7 +129,7 @@ async function loadData() {
     const geojsonData = await response.json();
 
     if (!geojsonData.features || geojsonData.features.length === 0) {
-      throw new Error('Nessuna feature trovata.');
+      throw new Error('Nessuna feature trouvata.');
     }
 
     geojsonData.features.forEach(feature => {
@@ -138,7 +145,7 @@ async function loadData() {
     originalGeojsonData = JSON.parse(JSON.stringify(geojsonData));
 
     data = geojsonData.features.map(feature => ({
-      liv_artif: parseInt(feature.properties.liv_artif) || 0,
+      liv_artif: parseInt(feature.properties.liv_artif) || 1,
       cop_arb: feature.properties.cop_arb || 0,
       cop_erb: feature.properties.cop_erb || 0,
       cop_cons: feature.properties.cop_cons || 0,
@@ -155,23 +162,20 @@ async function loadData() {
     });
 
     map = L.map('mapDiv').setView([42.5, 12.5], 6);
-    
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '© OpenStreetMap © CARTO'
     }).addTo(map);
 
     geojsonLayer = L.geoJSON(null).addTo(map);
 
+    // CORREZIONE: Nuova Legenda coordinata con le tue definizioni scientifiche
     const legend = L.control({position: 'bottomright'});
     legend.onAdd = function () {
       const div = L.DomUtil.create('div', 'info legend');
-      const grades = [0, 25, 50, 75];
-      const colors = ['rgba(254, 217, 142, 0.5)', 'rgba(253, 141, 60, 0.6)', 'rgba(235, 60, 0, 0.7)', 'rgba(180, 0, 0, 0.9)'];
-      
-      div.innerHTML = '<h6>Copertura Costruita</h6>';
-      for (let i = 0; i < grades.length; i++) {
-        div.innerHTML += '<i style="background:' + colors[i] + '"></i> ' + grades[i] + '%+<br>';
-      }
+      div.innerHTML = '<h6>Livelli Urbanizzazione</h6>';
+      div.innerHTML += '<i style="background:' + coloriLivelli[1] + '"></i> Rurale (LC &lt; 10%)<br>';
+      div.innerHTML += '<i style="background:' + coloriLivelli[2] + '"></i> Suburbano (LC 10%-50%)<br>';
+      div.innerHTML += '<i style="background:' + coloriLivelli[3] + '"></i> Urbano (LC &gt; 50%)<br>';
       return div;
     };
     legend.addTo(map);
@@ -185,31 +189,32 @@ async function loadData() {
 }
 
 function updateDashboard() {
-  let filteredData = [...data];
-  if (selectedLevel !== "all") {
-    filteredData = filteredData.filter(item => item.liv_artif === parseInt(selectedLevel));
-  }
+  let filteredData = data.filter(item => item.liv_artif === parseInt(selectedLevel));
+  
   if (selectedComune !== "all") {
     filteredData = filteredData.filter(item => item.comune === selectedComune);
   }
 
   const comuni = filteredData.map(item => item.comune);
-  const trace1 = { x: comuni, y: filteredData.map(item => item.cop_arb), type: 'bar', name: 'Arborea', marker: { color: '#2ecc71' } };
-  const trace2 = { x: comuni, y: filteredData.map(item => item.cop_erb), type: 'bar', name: 'Erbacea', marker: { color: '#f1c40f' } };
-  const trace3 = { x: comuni, y: filteredData.map(item => item.cop_cons), type: 'bar', name: 'Costruita', marker: { color: '#e74c3c' } };
+  const trace = {
+    x: comuni,
+    y: filteredData.map(item => item.cop_cons),
+    type: 'bar',
+    name: `Livello ${selectedLevel}`,
+    marker: { color: coloriLivelli[selectedLevel] }
+  };
 
   const layout = {
-    barmode: 'group',
     margin: { t: 30, l: 40, r: 20, b: 80 },
-    legend: { orientation: "h", y: 1.1 },
-    xaxis: { tickangle: -45 }
+    xaxis: { tickangle: -45 },
+    yaxis: { title: 'Copertura Consumata (%)', range: [0, 100] }
   };
-  Plotly.newPlot('myDiv', [trace1, trace2, trace3], layout);
+  Plotly.newPlot('myDiv', [trace], layout);
 
   geojsonLayer.clearLayers();
   
   const filteredFeatures = originalGeojsonData.features.filter(feature => {
-    const matchLvl = (selectedLevel === "all" || parseInt(feature.properties.liv_artif) === parseInt(selectedLevel));
+    const matchLvl = parseInt(feature.properties.liv_artif) === parseInt(selectedLevel);
     const matchCom = (selectedComune === "all" || feature.properties.comune === selectedComune);
     return matchLvl && matchCom;
   });
@@ -222,10 +227,9 @@ function updateDashboard() {
       <div class="p-1">
         <h5>${layer.feature.properties.comune}</h5>
         <hr class="my-1">
-        <b>Livello Artificiale:</b> ${layer.feature.properties.liv_artif}<br>
-        <span style="color:#2ecc71">●</span> <b>Arborea:</b> ${layer.feature.properties.cop_arb}%<br>
-        <span style="color:#f1c40f">●</span> <b>Erbacea:</b> ${layer.feature.properties.cop_erb}%<br>
-        <span style="color:#e74c3c">●</span> <b>Costruita:</b> ${layer.feature.properties.cop_cons}%
+        <b>Categoria:</b> Livello Artificiale ${layer.feature.properties.liv_artif}<br>
+        <span style="color:${coloriLivelli[selectedLevel]}">●</span> <b>Copertura Consumata:</b> ${layer.feature.properties.cop_cons}%<br>
+        <small class="text-muted">Arborea: ${layer.feature.properties.cop_arb}% | Erbacea: ${layer.feature.properties.cop_erb}%</small>
       </div>
     `);
 
@@ -252,9 +256,7 @@ document.getElementById('comuneSelect').addEventListener('change', function() {
 });
 
 document.getElementById('resetBtn').addEventListener('click', function() {
-  selectedLevel = "all";
   selectedComune = "all";
-  document.getElementById('liv_artifSelect').value = "all";
   document.getElementById('comuneSelect').value = "all";
   updateDashboard();
   map.setView([42.5, 12.5], 6);
